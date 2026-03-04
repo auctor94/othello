@@ -1,0 +1,37 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --board-bg: #0d5c2e;
+  --board-line: rgba(255,255,255,0.15);
+  --black: #1a1a1a;
+  --white: #f0f0f0;
+  --valid-dot: rgba(255,255,255,0.6);
+  --accent: #e94560;
+  --text: #eaeaea;
+  --text-muted: #a0a0a0;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px;
+}
+
+#root {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}

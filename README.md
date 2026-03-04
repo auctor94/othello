@@ -1,5 +1,11 @@
 Goal: to implement the game Reversi in Python and make it possible to play it in Telegram using Telegram mini apps.
 
+## to do
+
+ - [ ] upgrade AI Bot (2 levels: easy and little bit wiser)
+
+
+
 ## Architecture
 
 Telegram Client
@@ -83,3 +89,23 @@ pip install -r requirements.txt
    The response is the updated state after your move and the AI’s reply (if any).
 
 5. **Interactive docs:** open http://127.0.0.1:8000/docs and try the endpoints from the browser.
+
+## Web UI
+
+A simple React UI lives in `web/`. It provides:
+
+- **Header:** Black/White score and current turn (with a pulsing dot when it’s your turn).
+- **Board:** 8×8 grid; valid moves show a subtle dot; click to play (human = White).
+- **Footer:** Restart (new game) and Exit (closes window or Telegram Mini App).
+
+Run backend and frontend:
+
+```bash
+# Terminal 1 – backend
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+# Terminal 2 – frontend
+cd web && npm install && npm run dev
+```
+
+Then open http://localhost:5173.
