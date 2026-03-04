@@ -27,6 +27,16 @@ def has_valid_move(board: Board, player: Cell) -> bool:
                 return True
     return False
 
+
+def get_valid_moves(board: Board, player: Cell) -> list[Move]:
+    """Return list of (row, col) that are valid moves for player."""
+    moves = []
+    for r in range(8):
+        for c in range(8):
+            if collect_flips(board, player, (r, c)):
+                moves.append((r, c))
+    return moves
+
 def is_game_over(board: Board) -> bool:
     from .rules import opponent
     return (
