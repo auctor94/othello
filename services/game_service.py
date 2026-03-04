@@ -1,31 +1,32 @@
-from core.engine import apply_move, is_game_over
+from core.engine import apply_move, is_game_over, InvalidMove
 from core.rules import collect_flips
-from db.models import Game
 from core.types import Cell
+from db.models import Game
+
 
 class GameService:
+    """Single-player: human = WHITE, AI = BLACK."""
 
-    def __init__(self, repo):
+    def __init__(self, repo) -> None:
         self.repo = repo
 
-    def make_move(self, game_id: str, user_id: int, move):
+    def make_move(self, game_id: str, move: tuple[int, int]) -> Game:
         game = self.repo.get(game_id)
-
         if game.status != "active":
             raise ValueError("Game finished")
+        if game.turn != Cell.WHITE:
+            raise ValueError("Not your turn (human plays WHITE)")
 
-        player = self._resolve_player(game, user_id)
-        if game.turn != player:
-            raise ValueError("Not your turn")
+        apply_move(game.board, Cell.WHITE, move)
+        game.turn = Cell.BLACK
 
-        apply_move(game.board, player, move)
-        game.turn = self._next_turn(player)
-
-        if game.turn == Cell.WHITE and not is_game_over(game.board):
-            ai_move = self._compute_ai_move(game.board)
+        if not is_game_over(game.board):
+            ai_move = self._ai_move(game.board)
             if ai_move:
-                apply_move(game.board, Cell.WHITE, ai_move)
-                game.turn = self._next_turn(Cell.WHITE)
+                apply_move(game.board, Cell.BLACK, ai_move)
+                game.turn = Cell.WHITE
+            else:
+                game.turn = Cell.WHITE  # AI had no move, back to human
 
         if is_game_over(game.board):
             game.status = "finished"
@@ -33,34 +34,10 @@ class GameService:
         self.repo.save(game)
         return game
 
-    def _resolve_player(self, game: Game, user_id: int) -> Cell:
-        if user_id == game.player_human:
-            return Cell.BLACK
-        elif game.player_ai:
-            return Cell.WHITE
-        else:
-            raise ValueError("Game has no human player")
-
-
-    def _next_turn(self, player: Cell) -> Cell:
-        return Cell.WHITE if player == Cell.BLACK else Cell.BLACK
-
-    def _compute_ai_move(self, board):
+    def _ai_move(self, board) -> tuple[int, int] | None:
+        """Simple AI: first valid move for BLACK."""
         for r in range(8):
             for c in range(8):
-                if collect_flips(board, Cell.WHITE, (r, c)):
+                if collect_flips(board, Cell.BLACK, (r, c)):
                     return (r, c)
         return None
-
-    def format_board(self, game):
-        symbols = {
-            Cell.BLACK: "B",
-            Cell.WHITE: "W",
-            Cell.EMPTY: "."
-        }
-        header = "  " + " ".join(str(i) for i in range(8))
-        lines = [header]
-        for idx, row in enumerate(game.board):
-            line = str(idx) + " " + " ".join(symbols.get(cell, ".") for cell in row)
-            lines.append(line)
-        return "\n".join(lines)

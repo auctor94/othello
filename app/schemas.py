@@ -1,10 +1,8 @@
 from pydantic import BaseModel
-from typing import List
-from core.types import Cell, Board
+from core.types import Board, Cell
 
 
 class MoveRequest(BaseModel):
-    user_id: int
     row: int
     col: int
 
@@ -14,4 +12,3 @@ class GameResponse(BaseModel):
     board: Board
     turn: Cell
     status: str
-

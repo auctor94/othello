@@ -1,32 +1,21 @@
-from dataclasses import dataclass
-from typing import List
-from core.board import create_initial_board
-from core.types import Cell, Board
 import uuid
+from core.board import create_initial_board
+from core.types import Cell
+from db.models import Game
 
-@dataclass
-class Game:
-    id: str
-    player_human: int
-    player_ai: str = "AI"
-    board: Board = None
-    turn: Cell = Cell.BLACK
-    status: str = "active"
 
 class InMemoryRepo:
-    def __init__(self):
+    def __init__(self) -> None:
         self.games: dict[str, Game] = {}
 
-    def create_game(self, player_human: int) -> Game:
-        game_id = str(uuid.uuid4())
+    def create_game(self) -> Game:
         game = Game(
-            id=game_id,
-            player_human=player_human,
+            id=str(uuid.uuid4()),
             board=create_initial_board(),
-            turn=Cell.BLACK,
+            turn=Cell.WHITE,
             status="active",
         )
-        self.games[game_id] = game
+        self.games[game.id] = game
         return game
 
     def get(self, game_id: str) -> Game:
