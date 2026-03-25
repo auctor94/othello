@@ -170,6 +170,20 @@
   transform: scale(0.98);
 }
 
+.footer button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-pass {
+  background: #6b4c9a;
+  color: var(--white);
+}
+
+.btn-pass:hover:not(:disabled) {
+  background: #7d5cb0;
+}
+
 .btn-restart {
   background: #2d5a3d;
   color: var(--white);

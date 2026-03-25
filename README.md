@@ -1,4 +1,4 @@
-Goal: to implement the game Reversi in Python and make it possible to play it in Telegram using Telegram mini apps.
+Goal: implement the Reversi game in Python with a web UI and HTTP API.
 
 ## to do
 
@@ -8,13 +8,11 @@ Goal: to implement the game Reversi in Python and make it possible to play it in
 
 ## Architecture
 
-Telegram Client
-   ↓
-Mini App (Frontend)
+Browser (React UI)
    ↓ HTTPS
-Backend API (Game Logic)
+Backend API (game logic)
    ↓
-Database (game state)
+In-memory game state (repo)
 
 ## Project Structure (Planned)
 
@@ -96,7 +94,7 @@ A simple React UI lives in `web/`. It provides:
 
 - **Header:** Black/White score and current turn (with a pulsing dot when it’s your turn).
 - **Board:** 8×8 grid; valid moves show a subtle dot; click to play (human = White).
-- **Footer:** Restart (new game) and Exit (closes window or Telegram Mini App).
+- **Footer:** Restart (new game) and Exit (tries to close the browser tab/window).
 
 Run backend and frontend:
 

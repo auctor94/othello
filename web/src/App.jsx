@@ -172,16 +172,40 @@ export default function App() {
     }, AI_DELAY_MS)
   }
 
+  const playPass = async () => {
+    if (!gameId || game?.status !== 'active') return
+    if (game.turn !== 'W' || validMoves.length > 0) return
+    setError(null)
+    const boardBefore = game.board.map((row) => [...row])
+    setSubmitting(true)
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API}/game/${gameId}/pass`, { method: 'POST' })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.detail || 'Cannot pass')
+        }
+        const data = await res.json()
+        const changed = cellsChanged(boardBefore, data.board)
+        setGame(data)
+        setHighlightCells(changed)
+        await fetchValidMoves(gameId)
+        setTimeout(() => setHighlightCells(new Set()), HIGHLIGHT_AI_MS)
+      } catch (e) {
+        setError(e.message)
+      } finally {
+        setSubmitting(false)
+      }
+    }, AI_DELAY_MS)
+  }
+
   const handleRestart = () => {
     createGame()
   }
 
   const handleExit = () => {
-    if (typeof window.Telegram?.WebApp?.close === 'function') {
-      window.Telegram.WebApp.close()
-    } else {
-      window.close()
-    }
+    window.close()
   }
 
   if (loading && !game) {
@@ -202,14 +226,17 @@ export default function App() {
   const blackCount = countPieces(displayBoard, 'B')
   const whiteCount = countPieces(displayBoard, 'W')
   const isHumanTurn = game?.turn === 'W' && game?.status === 'active' && !submitting
+  const mustPass = isHumanTurn && validMoves.length === 0
   const gameOver = game?.status === 'finished'
   const turnLabel = gameOver
     ? 'Game over'
     : submitting
       ? 'AI is thinking…'
-      : game?.turn === 'B'
-        ? "AI's turn"
-        : 'Your turn'
+      : mustPass
+        ? 'No legal moves — pass'
+        : game?.turn === 'B'
+          ? "AI's turn"
+          : 'Your turn'
 
   return (
     <>
@@ -264,6 +291,11 @@ export default function App() {
       )}
 
       <footer className="footer">
+        {mustPass && (
+          <button type="button" className="btn-pass" onClick={() => playPass()} disabled={submitting}>
+            Pass
+          </button>
+        )}
         <button type="button" className="btn-restart" onClick={handleRestart}>
           Restart
         </button>
