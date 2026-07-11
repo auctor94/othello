@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import './App.css'
 
-const API = 'http://127.0.0.1:8000'
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const AI_DELAY_MS = 1400
 const HIGHLIGHT_AI_MS = 800
 
