@@ -1,17 +1,28 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.deps import repo
 from core.types import Cell
+from db.repo import InMemoryRepo
 
 
-client = TestClient(app)
+@pytest.fixture
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
 
-def setup_function():
-    repo.games.clear()
+@pytest.fixture(autouse=True)
+def reset_repo():
+    if isinstance(repo, InMemoryRepo):
+        repo.games.clear()
+    yield
+    if isinstance(repo, InMemoryRepo):
+        repo.games.clear()
 
-def test_post_game_returns_initial_payload():
+
+def test_post_game_returns_initial_payload(client):
     response = client.post("/game")
 
     assert response.status_code == 200
@@ -27,7 +38,7 @@ def test_post_game_returns_initial_payload():
     assert all(len(row) == 8 for row in data["board"])
 
 
-def test_get_game_existing_and_missing_id():
+def test_get_game_existing_and_missing_id(client):
     created = client.post("/game")
     game_id = created.json()["id"]
 
@@ -40,7 +51,7 @@ def test_get_game_existing_and_missing_id():
     assert missing.json()["detail"] == "Game not found"
 
 
-def test_post_move_valid_and_invalid_move():
+def test_post_move_valid_and_invalid_move(client):
     created = client.post("/game")
     game_id = created.json()["id"]
 
@@ -53,7 +64,7 @@ def test_post_move_valid_and_invalid_move():
     assert invalid.json()["detail"] == "Invalid move"
 
 
-def test_post_move_forbidden_when_game_finished():
+def test_post_move_forbidden_when_game_finished(client):
     created = client.post("/game")
     game_id = created.json()["id"]
     game = repo.get(game_id)
@@ -66,7 +77,7 @@ def test_post_move_forbidden_when_game_finished():
     assert response.json()["detail"] == "Game finished"
 
 
-def test_get_valid_moves_returns_list_of_lists():
+def test_get_valid_moves_returns_list_of_lists(client):
     created = client.post("/game")
     game_id = created.json()["id"]
 
