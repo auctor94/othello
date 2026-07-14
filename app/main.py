@@ -7,8 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from app.routes import game
-from db.orm import Base
+from app.routes import game, stats
+from db.schema import ensure_schema
 from db.session import engine
 
 _cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173")
@@ -18,7 +18,7 @@ allow_origins = [origin.strip() for origin in _cors_origins.split(",") if origin
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if engine is not None:
-        Base.metadata.create_all(bind=engine)
+        ensure_schema(engine)
     yield
 
 
@@ -33,6 +33,7 @@ app.add_middleware(
 )
 
 app.include_router(game.router, prefix="/game", tags=["game"])
+app.include_router(stats.router, tags=["stats"])
 
 
 @app.get("/")
