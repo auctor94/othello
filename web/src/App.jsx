@@ -71,6 +71,11 @@ export default function App() {
   const [highlightCells, setHighlightCells] = useState(new Set())
   /** Cell where human just placed (for brief place animation) */
   const [justPlaced, setJustPlaced] = useState(null)
+  const [showInstructions, setShowInstructions] = useState(true)
+  /** Optional hover assist: highlight pieces that would flip */
+  const [flipForesight, setFlipForesight] = useState(false)
+  /** Valid move cell under cursor, for flip preview */
+  const [hoverMove, setHoverMove] = useState(null)
 
   const fetchGame = useCallback(async (id) => {
     if (!id) return
@@ -105,6 +110,7 @@ export default function App() {
     setOptimisticBoard(null)
     setHighlightCells(new Set())
     setJustPlaced(null)
+    setHoverMove(null)
     try {
       const res = await fetch(`${API}/game`, { method: 'POST' })
       if (!res.ok) throw new Error('Failed to create game')
@@ -141,6 +147,7 @@ export default function App() {
     setJustPlaced(`${row},${col}`)
     setOptimisticBoard(afterHuman)
     setValidMoves([])
+    setHoverMove(null)
     setSubmitting(true)
 
     const timer = setTimeout(async () => {
@@ -208,17 +215,88 @@ export default function App() {
     window.close()
   }
 
+  const instructionsModal = showInstructions ? (
+    <div
+      className="modal-overlay"
+      onClick={() => setShowInstructions(false)}
+      role="presentation"
+    >
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="instructions-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <h2 id="instructions-title">How to Play</h2>
+          <button
+            type="button"
+            className="modal-close"
+            onClick={() => setShowInstructions(false)}
+            aria-label="Close instructions"
+          >
+            ×
+          </button>
+        </div>
+        <div className="modal-body">
+          <p>
+            Reversi is a strategy board game for two players where the goal is to finish with
+            the most pieces of your color on the 8 × 8 board. Players take turns placing pieces
+            with their color facing up. A valid move requires you to &quot;flank&quot; or
+            &quot;trap&quot; your opponent&apos;s pieces.
+          </p>
+          <h3>Setup</h3>
+          <p>
+            The game begins with 4 pieces in the center squares of the board: two dark pieces
+            and two light pieces, placed diagonally across from each other.
+          </p>
+          <h3>Make a Move</h3>
+          <p>
+            On your turn, place a new piece on any empty square so that it traps one or more of
+            your opponent&apos;s pieces in a straight continuous line. This line can be
+            horizontal, vertical, or diagonal.
+          </p>
+          <h3>Flanking &amp; Flipping</h3>
+          <p>
+            To trap a line, there must already be one of your pieces at the other end of that
+            line. When you successfully flank your opponent&apos;s pieces, you flip all of those
+            sandwiched pieces to your color.
+          </p>
+          <h3>Mandatory Captures</h3>
+          <p>
+            You can only make a move if it traps and flips at least one of your opponent&apos;s
+            pieces. If you have no valid moves, you must &quot;Pass&quot; your turn.
+          </p>
+          <h3>Winning</h3>
+          <p>
+            The game ends when the board is completely full, or neither player can make a legal
+            move. The player with the highest number of their color disks wins the game.
+          </p>
+        </div>
+      </div>
+    </div>
+  ) : null
+
   if (loading && !game) {
-    return <div className="loading">Starting game…</div>
+    return (
+      <>
+        <div className="loading">Starting game…</div>
+        {instructionsModal}
+      </>
+    )
   }
 
   if (error && !game) {
     return (
-      <div className="error">
-        {error}
-        <br />
-        <button className="btn-restart" onClick={createGame} style={{ marginTop: 8 }}>Retry</button>
-      </div>
+      <>
+        <div className="error">
+          {error}
+          <br />
+          <button className="btn-restart" onClick={createGame} style={{ marginTop: 8 }}>Retry</button>
+        </div>
+        {instructionsModal}
+      </>
     )
   }
 
@@ -238,71 +316,132 @@ export default function App() {
           ? "AI's turn"
           : 'Your turn'
 
+  const hoverFlipKeys =
+    flipForesight &&
+    hoverMove &&
+    isHumanTurn &&
+    isValidMove(validMoves, hoverMove.row, hoverMove.col)
+      ? new Set(
+          collectFlips(displayBoard, 'W', [hoverMove.row, hoverMove.col]).map(
+            ([fr, fc]) => `${fr},${fc}`
+          )
+        )
+      : new Set()
+
   return (
     <>
-      <header className="header">
-        <span className="score">Black: {blackCount} – White: {whiteCount}</span>
-        <span className="turn-indicator">
-          <span
-            className={`turn-dot ${game?.turn?.toLowerCase()} ${isHumanTurn && !submitting ? 'pulse' : ''}`}
-            aria-hidden
-          />
-          {turnLabel}
-        </span>
-      </header>
-
-      {error && <p className="error">{error}</p>}
-
-      <div
-        className="board"
-        role="grid"
-        aria-label="Reversi board"
-      >
-        {Array.from({ length: 64 }, (_, i) => {
-          const r = Math.floor(i / 8)
-          const c = i % 8
-          const cell = displayBoard[r]?.[c]
-          const empty = !cell || cell === '.'
-          const clickable = empty && isValidMove(validMoves, r, c) && isHumanTurn && !gameOver
-          const showDot = empty && isValidMove(validMoves, r, c) && isHumanTurn
-          const key = `${r},${c}`
-          const isHighlight = highlightCells.has(key)
-          const isJustPlaced = justPlaced === key
-          return (
-            <div
-              key={key}
-              role="gridcell"
-              className={`cell ${clickable ? 'clickable' : ''} ${gameOver ? 'game-over' : ''} ${isHighlight ? 'highlight-ai' : ''} ${isJustPlaced ? 'just-placed' : ''}`}
-              onClick={() => clickable && playMove(r, c)}
-              aria-label={cell === 'B' ? 'Black' : cell === 'W' ? 'White' : showDot ? 'Valid move' : 'Empty'}
-            >
-              {cell === 'B' && <span className="piece black" />}
-              {cell === 'W' && <span className="piece white" />}
-              {showDot && <span className="valid-dot" />}
+      <div className="layout">
+        <div className="main">
+          <header className="header">
+            <div className="scoreboard" aria-label="Score">
+              <div
+                className={`score-card black ${game?.turn === 'B' && !gameOver ? 'active' : ''}`}
+              >
+                <span className="score-disc black" aria-hidden />
+                <div className="score-meta">
+                  <span className="score-label">Black · AI</span>
+                  <span className="score-value">{blackCount}</span>
+                </div>
+              </div>
+              <div
+                className={`score-card white ${game?.turn === 'W' && !gameOver ? 'active' : ''}`}
+              >
+                <span className="score-disc white" aria-hidden />
+                <div className="score-meta">
+                  <span className="score-label">White · You</span>
+                  <span className="score-value">{whiteCount}</span>
+                </div>
+              </div>
             </div>
-          )
-        })}
+            <span className="turn-indicator">
+              <span
+                className={`turn-dot ${game?.turn?.toLowerCase()} ${isHumanTurn && !submitting ? 'pulse' : ''}`}
+                aria-hidden
+              />
+              {turnLabel}
+            </span>
+          </header>
+
+          {error && <p className="error">{error}</p>}
+
+          <div
+            className="board"
+            role="grid"
+            aria-label="Reversi board"
+            onMouseLeave={() => setHoverMove(null)}
+          >
+            {Array.from({ length: 64 }, (_, i) => {
+              const r = Math.floor(i / 8)
+              const c = i % 8
+              const cell = displayBoard[r]?.[c]
+              const empty = !cell || cell === '.'
+              const clickable = empty && isValidMove(validMoves, r, c) && isHumanTurn && !gameOver
+              const showDot = empty && isValidMove(validMoves, r, c) && isHumanTurn
+              const key = `${r},${c}`
+              const isHighlight = highlightCells.has(key)
+              const isJustPlaced = justPlaced === key
+              const isFlipPreview = flipForesight && hoverFlipKeys.has(key)
+              const isHoverTarget =
+                flipForesight && hoverMove?.row === r && hoverMove?.col === c && clickable
+              return (
+                <div
+                  key={key}
+                  role="gridcell"
+                  className={`cell ${clickable ? 'clickable' : ''} ${gameOver ? 'game-over' : ''} ${isHighlight ? 'highlight-ai' : ''} ${isJustPlaced ? 'just-placed' : ''} ${isFlipPreview ? 'flip-preview' : ''} ${isHoverTarget ? 'hover-target' : ''}`}
+                  onClick={() => clickable && playMove(r, c)}
+                  onMouseEnter={() => {
+                    if (flipForesight && clickable) setHoverMove({ row: r, col: c })
+                    else setHoverMove(null)
+                  }}
+                  aria-label={cell === 'B' ? 'Black' : cell === 'W' ? 'White' : showDot ? 'Valid move' : 'Empty'}
+                >
+                  {cell === 'B' && <span className="piece black" />}
+                  {cell === 'W' && <span className="piece white" />}
+                  {showDot && !(isHoverTarget) && <span className="valid-dot" />}
+                  {isHoverTarget && <span className="piece white preview-ghost" />}
+                </div>
+              )
+            })}
+          </div>
+
+          {gameOver && (
+            <p className="status">
+              {blackCount > whiteCount ? 'Black (AI) wins!' : whiteCount > blackCount ? 'White (You) win!' : 'Draw!'}
+            </p>
+          )}
+        </div>
+
+        <aside className="side-panel" aria-label="Game controls">
+          <button type="button" className="btn-instructions" onClick={() => setShowInstructions(true)}>
+            Instructions
+          </button>
+
+          <label className="option-toggle" title="Highlight pieces that would flip on hover">
+            <input
+              type="checkbox"
+              checked={flipForesight}
+              onChange={(e) => setFlipForesight(e.target.checked)}
+            />
+            <span>Flip foresight</span>
+          </label>
+
+          <div className="side-panel-actions">
+            {mustPass && (
+              <button type="button" className="btn-pass" onClick={() => playPass()} disabled={submitting}>
+                Pass
+              </button>
+            )}
+            <button type="button" className="btn-restart" onClick={handleRestart}>
+              Restart
+            </button>
+            <button type="button" className="btn-exit" onClick={handleExit}>
+              Exit
+            </button>
+          </div>
+        </aside>
       </div>
 
-      {gameOver && (
-        <p className="status">
-          {blackCount > whiteCount ? 'Black (AI) wins!' : whiteCount > blackCount ? 'White (You) win!' : 'Draw!'}
-        </p>
-      )}
-
-      <footer className="footer">
-        {mustPass && (
-          <button type="button" className="btn-pass" onClick={() => playPass()} disabled={submitting}>
-            Pass
-          </button>
-        )}
-        <button type="button" className="btn-restart" onClick={handleRestart}>
-          Restart
-        </button>
-        <button type="button" className="btn-exit" onClick={handleExit}>
-          Exit
-        </button>
-      </footer>
+      {instructionsModal}
     </>
   )
 }
