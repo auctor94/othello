@@ -1,9 +1,32 @@
 import { useState, useEffect, useCallback } from 'react'
+import { clearGameBootstrap, fetchApi, fetchStats, loadOrCreateGame } from './api'
 import './App.css'
 
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const AI_DELAY_MS = 1400
 const HIGHLIGHT_AI_MS = 800
+
+/** H:MM:SS when ≥1h, otherwise M:SS */
+function formatDuration(seconds) {
+  if (seconds == null || Number.isNaN(Number(seconds))) return 'N/A'
+  const total = Math.max(0, Math.round(Number(seconds)))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  }
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+/** e.g. 1/3 (33%) */
+function formatRatio(count, started, pct) {
+  const p = Number.isFinite(pct) ? Math.round(pct) : 0
+  return `${count}/${started} (${p}%)`
+}
+
+function formatOptional(value) {
+  return value == null ? 'N/A' : String(value)
+}
 
 function countPieces(board, color) {
   if (!board) return 0
@@ -72,8 +95,12 @@ export default function App() {
   /** Cell where human just placed (for brief place animation) */
   const [justPlaced, setJustPlaced] = useState(null)
   const [showInstructions, setShowInstructions] = useState(true)
+  const [showStats, setShowStats] = useState(false)
+  const [stats, setStats] = useState(null)
+  const [statsLoading, setStatsLoading] = useState(false)
+  const [statsError, setStatsError] = useState(null)
   /** Optional hover assist: highlight pieces that would flip */
-  const [flipForesight, setFlipForesight] = useState(false)
+  const [flipForesight, setFlipForesight] = useState(true)
   /** Valid move cell under cursor, for flip preview */
   const [hoverMove, setHoverMove] = useState(null)
 
@@ -81,7 +108,7 @@ export default function App() {
     if (!id) return
     setError(null)
     try {
-      const res = await fetch(`${API}/game/${id}`)
+      const res = await fetchApi(`/game/${id}`)
       if (!res.ok) throw new Error('Failed to load game')
       const data = await res.json()
       setGame(data)
@@ -95,7 +122,7 @@ export default function App() {
   const fetchValidMoves = useCallback(async (id) => {
     if (!id) return
     try {
-      const res = await fetch(`${API}/game/${id}/valid-moves`)
+      const res = await fetchApi(`/game/${id}/valid-moves`)
       if (!res.ok) return
       const data = await res.json()
       setValidMoves(data.moves || [])
@@ -104,7 +131,18 @@ export default function App() {
     }
   }, [])
 
+  const applyGame = useCallback(
+    async (data) => {
+      setGameId(data.id)
+      setGame(data)
+      await fetchValidMoves(data.id)
+    },
+    [fetchValidMoves]
+  )
+
+  /** Restart / Retry: abandon current and start a new game. */
   const createGame = useCallback(async () => {
+    clearGameBootstrap()
     setLoading(true)
     setError(null)
     setOptimisticBoard(null)
@@ -112,21 +150,38 @@ export default function App() {
     setJustPlaced(null)
     setHoverMove(null)
     try {
-      const res = await fetch(`${API}/game`, { method: 'POST' })
+      const res = await fetchApi('/game', { method: 'POST' })
       if (!res.ok) throw new Error('Failed to create game')
       const data = await res.json()
-      setGameId(data.id)
-      setGame(data)
-      await fetchValidMoves(data.id)
+      clearGameBootstrap()
+      await applyGame(data)
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [fetchValidMoves])
+  }, [applyGame])
+
+  /** First load / reload: resume active game; do not abandon on refresh. */
+  const initGame = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    setOptimisticBoard(null)
+    setHighlightCells(new Set())
+    setJustPlaced(null)
+    setHoverMove(null)
+    try {
+      const data = await loadOrCreateGame()
+      await applyGame(data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [applyGame])
 
   useEffect(() => {
-    createGame()
+    initGame()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -150,11 +205,10 @@ export default function App() {
     setHoverMove(null)
     setSubmitting(true)
 
-    const timer = setTimeout(async () => {
+    setTimeout(async () => {
       try {
-        const res = await fetch(`${API}/game/${gameId}/move`, {
+        const res = await fetchApi(`/game/${gameId}/move`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ row, col }),
         })
         if (!res.ok) {
@@ -186,9 +240,9 @@ export default function App() {
     const boardBefore = game.board.map((row) => [...row])
     setSubmitting(true)
 
-    const timer = setTimeout(async () => {
+    setTimeout(async () => {
       try {
-        const res = await fetch(`${API}/game/${gameId}/pass`, { method: 'POST' })
+        const res = await fetchApi(`/game/${gameId}/pass`, { method: 'POST' })
         if (!res.ok) {
           const err = await res.json().catch(() => ({}))
           throw new Error(err.detail || 'Cannot pass')
@@ -213,6 +267,23 @@ export default function App() {
 
   const handleExit = () => {
     window.close()
+  }
+
+  const openStats = async () => {
+    setShowInstructions(false)
+    setShowStats(true)
+    setStatsLoading(true)
+    setStatsError(null)
+    try {
+      const res = await fetchStats()
+      if (!res.ok) throw new Error('Failed to load statistics')
+      setStats(await res.json())
+    } catch (e) {
+      setStatsError(e.message)
+      setStats(null)
+    } finally {
+      setStatsLoading(false)
+    }
   }
 
   const instructionsModal = showInstructions ? (
@@ -273,6 +344,84 @@ export default function App() {
             The game ends when the board is completely full, or neither player can make a legal
             move. The player with the highest number of their color disks wins the game.
           </p>
+
+          <aside className="instructions-tip" aria-label="Flip foresight">
+            <h3>Flip foresight</h3>
+            <p>
+              Flip foresight is on by default. Hover a highlighted legal move to preview which
+              opponent pieces would flip if you played there. Turn it off anytime with the
+              toggle in the side panel.
+            </p>
+          </aside>
+        </div>
+      </div>
+    </div>
+  ) : null
+
+  const statsRows = stats
+    ? [
+        ['Since', stats.since ? new Date(stats.since).toLocaleDateString() : 'N/A'],
+        ['Days', String(stats.days ?? 0)],
+        ['Games started', String(stats.started)],
+        ['Games finished', String(stats.finished)],
+        ['Abandoned', formatRatio(stats.abandoned, stats.started, stats.abandoned_pct)],
+        ['Won', formatRatio(stats.won, stats.finished, stats.won_pct)],
+        ['Lost', formatRatio(stats.lost, stats.finished, stats.lost_pct)],
+        ['Tied', formatRatio(stats.tied, stats.finished, stats.tied_pct)],
+        ['Highest score', formatOptional(stats.highest_score)],
+        [
+          'Lowest score',
+          stats.won + stats.lost === 0 ? 'N/A' : formatOptional(stats.lowest_score),
+        ],
+        ['Average score', formatOptional(stats.avg_score)],
+        ['Highest move score', formatOptional(stats.highest_move_score)],
+        ['Longest win streak', String(stats.longest_win_streak)],
+        ['Total time', formatDuration(stats.total_time)],
+        ['Average time', formatDuration(stats.avg_time)],
+        ['Min time', formatDuration(stats.min_time)],
+        ['Max time', formatDuration(stats.max_time)],
+      ]
+    : []
+
+  const statsModal = showStats ? (
+    <div
+      className="modal-overlay"
+      onClick={() => setShowStats(false)}
+      role="presentation"
+    >
+      <div
+        className="modal modal-stats"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="stats-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <h2 id="stats-title">Your statistics</h2>
+          <button
+            type="button"
+            className="modal-close"
+            onClick={() => setShowStats(false)}
+            aria-label="Close statistics"
+          >
+            ×
+          </button>
+        </div>
+        <div className="modal-body">
+          {statsLoading && <p className="stats-status">Loading…</p>}
+          {!statsLoading && statsError && <p className="error">{statsError}</p>}
+          {!statsLoading && !statsError && stats && (
+            <table className="stats-table">
+              <tbody>
+                {statsRows.map(([label, value]) => (
+                  <tr key={label}>
+                    <th scope="row">{label}</th>
+                    <td>{value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>
@@ -283,6 +432,7 @@ export default function App() {
       <>
         <div className="loading">Starting game…</div>
         {instructionsModal}
+        {statsModal}
       </>
     )
   }
@@ -296,6 +446,7 @@ export default function App() {
           <button className="btn-restart" onClick={createGame} style={{ marginTop: 8 }}>Retry</button>
         </div>
         {instructionsModal}
+        {statsModal}
       </>
     )
   }
@@ -412,8 +563,18 @@ export default function App() {
         </div>
 
         <aside className="side-panel" aria-label="Game controls">
-          <button type="button" className="btn-instructions" onClick={() => setShowInstructions(true)}>
+          <button
+            type="button"
+            className="btn-instructions"
+            onClick={() => {
+              setShowStats(false)
+              setShowInstructions(true)
+            }}
+          >
             Instructions
+          </button>
+          <button type="button" className="btn-instructions" onClick={openStats}>
+            Statistics
           </button>
 
           <label className="option-toggle" title="Highlight pieces that would flip on hover">
@@ -442,6 +603,7 @@ export default function App() {
       </div>
 
       {instructionsModal}
+      {statsModal}
     </>
   )
 }

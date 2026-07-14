@@ -1,16 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.schemas import MoveRequest, GameResponse
+
 from app.deps import get_game_service
-from services.game_service import GameService
+from app.player_id import require_player_id
+from app.schemas import MoveRequest, GameResponse
 from core.engine import InvalidMove, get_valid_moves
+from services.game_service import GameService
 
 router = APIRouter()
 
 
 @router.post("", response_model=GameResponse)
-def create_game(svc: GameService = Depends(get_game_service)):
+def create_game(
+    player_id: str = Depends(require_player_id),
+    svc: GameService = Depends(get_game_service),
+):
     """Start a new single-player game. Human = WHITE, AI = BLACK."""
-    game = svc.repo.create_game()
+    game = svc.create_game(player_id)
+    return _to_response(svc, game)
+
+
+@router.get("/active", response_model=GameResponse)
+def get_active_game(
+    player_id: str = Depends(require_player_id),
+    svc: GameService = Depends(get_game_service),
+):
+    """Return the player's current active game, if any (used to resume after reload)."""
+    game = svc.get_active_game(player_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="No active game")
     return _to_response(svc, game)
 
 
