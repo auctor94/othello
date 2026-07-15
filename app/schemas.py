@@ -1,8 +1,15 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
 from core.types import Board, Cell
+
+Difficulty = Literal["easy", "medium", "hard"]
+
+
+class CreateGameRequest(BaseModel):
+    difficulty: Difficulty = "easy"
 
 
 class MoveRequest(BaseModel):
@@ -15,6 +22,7 @@ class GameResponse(BaseModel):
     board: Board
     turn: Cell
     status: str
+    difficulty: Difficulty = "easy"
 
 
 class StatsResponse(BaseModel):

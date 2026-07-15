@@ -1,9 +1,12 @@
 from datetime import datetime, timezone
 
+from core.ai import choose_move
 from core.engine import apply_move, get_valid_moves, has_valid_move, is_game_over
 from core.rules import collect_flips, opponent
-from core.types import Board, Cell
+from core.types import Board, Cell, Move
 from db.models import Game
+
+DIFFICULTIES = frozenset({"easy", "medium", "hard"})
 
 
 def _utc_now() -> datetime:
@@ -77,12 +80,43 @@ class GameService:
     def __init__(self, repo) -> None:
         self.repo = repo
 
-    def create_game(self, player_id: str) -> Game:
+    def create_game(self, player_id: str, difficulty: str = "easy") -> Game:
+        if difficulty not in DIFFICULTIES:
+            raise ValueError("Invalid difficulty")
         self.repo.abandon_active_games(player_id)
-        return self.repo.create_game(player_id)
+        return self.repo.create_game(player_id, difficulty=difficulty)
+
+    def set_difficulty(self, game_id: str, difficulty: str) -> Game:
+        """Change AI difficulty only before the first move."""
+        if difficulty not in DIFFICULTIES:
+            raise ValueError("Invalid difficulty")
+        game = self.repo.get(game_id)
+        if game.status != "active":
+            raise ValueError("Game finished")
+        white, black = _count_stones(game.board)
+        if white + black != 4:
+            raise ValueError("Difficulty locked after game starts")
+        game.difficulty = difficulty
+        game.updated_at = _utc_now()
+        self.repo.save(game)
+        return game
+
+    def get_game(self, game_id: str) -> Game:
+        game = self.repo.get(game_id)
+        return self._ensure_finished_if_over(game)
 
     def get_active_game(self, player_id: str) -> Game | None:
-        return self.repo.get_active_for_player(player_id)
+        game = self.repo.get_active_for_player(player_id)
+        if game is None:
+            return None
+        return self._ensure_finished_if_over(game)
+
+    def _ensure_finished_if_over(self, game: Game) -> Game:
+        """Heal stuck active games where neither side has a legal move."""
+        if game.status == "active" and is_game_over(game.board):
+            self._finish_game(game)
+            self.repo.save(game)
+        return game
 
     def get_stats(self, player_id: str) -> dict:
         games = self.repo.list_by_player(player_id)
@@ -222,13 +256,14 @@ class GameService:
             if is_game_over(game.board):
                 self._finish_game(game)
                 return
-            if has_valid_move(game.board, game.turn):
-                if game.turn == Cell.BLACK:
-                    ai_move = self._ai_move(game.board)
-                    apply_move(game.board, Cell.BLACK, ai_move)
-                    game.turn = Cell.WHITE
+            if not has_valid_move(game.board, game.turn):
+                game.turn = opponent(game.turn)
+                continue
+            if game.turn == Cell.WHITE:
                 return
-            game.turn = opponent(game.turn)
+            ai_move = self._ai_move(game.board, game.difficulty)
+            apply_move(game.board, Cell.BLACK, ai_move)
+            game.turn = Cell.WHITE
 
     def _finish_game(self, game: Game) -> None:
         now = _utc_now()
@@ -245,10 +280,6 @@ class GameService:
         else:
             game.result = "draw"
 
-    def _ai_move(self, board) -> tuple[int, int] | None:
-        """Simple AI: first valid move for BLACK."""
-        for r in range(8):
-            for c in range(8):
-                if collect_flips(board, Cell.BLACK, (r, c)):
-                    return (r, c)
-        return None
+    def _ai_move(self, board: Board, difficulty: str = "easy") -> Move | None:
+        """Pick a BLACK move for the selected difficulty."""
+        return choose_move(board, difficulty)

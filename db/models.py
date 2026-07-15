@@ -20,3 +20,4 @@ class Game:
     white_score: int | None = None
     black_score: int | None = None
     max_move_flips: int | None = None
+    difficulty: str = "easy"  # "easy" | "medium" | "hard"

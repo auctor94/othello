@@ -19,7 +19,7 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _new_game(player_id: str) -> Game:
+def _new_game(player_id: str, difficulty: str = "easy") -> Game:
     now = _utc_now()
     return Game(
         id=str(uuid.uuid4()),
@@ -34,6 +34,7 @@ def _new_game(player_id: str) -> Game:
         white_score=None,
         black_score=None,
         max_move_flips=None,
+        difficulty=difficulty,
     )
 
 
@@ -46,6 +47,7 @@ def _apply_game_to_row(row: GameRow, game: Game) -> None:
     row.white_score = game.white_score
     row.black_score = game.black_score
     row.max_move_flips = game.max_move_flips
+    row.difficulty = game.difficulty
     row.created_at = game.created_at
     row.updated_at = game.updated_at
     row.finished_at = game.finished_at
@@ -65,6 +67,7 @@ def _row_to_game(row: GameRow) -> Game:
         white_score=row.white_score,
         black_score=row.black_score,
         max_move_flips=row.max_move_flips,
+        difficulty=getattr(row, "difficulty", None) or "easy",
     )
 
 
@@ -72,8 +75,8 @@ class InMemoryRepo:
     def __init__(self) -> None:
         self.games: dict[str, Game] = {}
 
-    def create_game(self, player_id: str) -> Game:
-        game = _new_game(player_id)
+    def create_game(self, player_id: str, difficulty: str = "easy") -> Game:
+        game = _new_game(player_id, difficulty=difficulty)
         self.games[game.id] = game
         return game
 
@@ -108,8 +111,8 @@ class PostgresRepo:
     def __init__(self, session_factory: SessionFactory) -> None:
         self._session_factory = session_factory
 
-    def create_game(self, player_id: str) -> Game:
-        game = _new_game(player_id)
+    def create_game(self, player_id: str, difficulty: str = "easy") -> Game:
+        game = _new_game(player_id, difficulty=difficulty)
         self.save(game)
         return game
 

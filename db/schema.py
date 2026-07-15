@@ -12,6 +12,7 @@ _GAMES_COLUMNS: list[tuple[str, str]] = [
     ("white_score", "INTEGER"),
     ("black_score", "INTEGER"),
     ("max_move_flips", "INTEGER"),
+    ("difficulty", "VARCHAR NOT NULL DEFAULT 'easy'"),
     ("created_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
     ("updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
     ("finished_at", "TIMESTAMPTZ"),

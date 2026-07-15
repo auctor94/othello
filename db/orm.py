@@ -20,6 +20,7 @@ class GameRow(Base):
     white_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     black_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_move_flips: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    difficulty: Mapped[str] = mapped_column(String, default="easy")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
