@@ -1,9 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { clearGameBootstrap, fetchApi, fetchStats, loadOrCreateGame } from './api'
 import './App.css'
 
 const AI_DELAY_MS = 1400
 const HIGHLIGHT_AI_MS = 800
+const LONG_PRESS_MS = 380
+const DIFFICULTIES = ['easy', 'medium', 'hard']
+
+function hasFineHover() {
+  return (
+    typeof window !== 'undefined' &&
+    window.matchMedia('(hover: hover) and (pointer: fine)').matches
+  )
+}
 
 /** H:MM:SS when ≥1h, otherwise M:SS */
 function formatDuration(seconds) {
@@ -99,10 +108,31 @@ export default function App() {
   const [stats, setStats] = useState(null)
   const [statsLoading, setStatsLoading] = useState(false)
   const [statsError, setStatsError] = useState(null)
-  /** Optional hover assist: highlight pieces that would flip */
+  /** Optional hover / long-press assist: highlight pieces that would flip */
   const [flipForesight, setFlipForesight] = useState(true)
-  /** Valid move cell under cursor, for flip preview */
+  /** Valid move cell under cursor or after long-press, for flip preview */
   const [hoverMove, setHoverMove] = useState(null)
+  /** AI difficulty: easy | medium | hard — locked after the first move */
+  const [difficulty, setDifficulty] = useState('easy')
+  const longPressRef = useRef(null)
+  /** After long-press foresight, ignore the synthetic click on that same cell */
+  const suppressClickRef = useRef(null)
+
+  const clearLongPress = useCallback(() => {
+    if (longPressRef.current?.timerId != null) {
+      clearTimeout(longPressRef.current.timerId)
+    }
+    longPressRef.current = null
+  }, [])
+
+  useEffect(() => () => clearLongPress(), [clearLongPress])
+
+  useEffect(() => {
+    if (!flipForesight) {
+      clearLongPress()
+      setHoverMove(null)
+    }
+  }, [flipForesight, clearLongPress])
 
   const fetchGame = useCallback(async (id) => {
     if (!id) return
@@ -135,32 +165,43 @@ export default function App() {
     async (data) => {
       setGameId(data.id)
       setGame(data)
+      if (DIFFICULTIES.includes(data.difficulty)) {
+        setDifficulty(data.difficulty)
+      }
       await fetchValidMoves(data.id)
     },
     [fetchValidMoves]
   )
 
   /** Restart / Retry: abandon current and start a new game. */
-  const createGame = useCallback(async () => {
-    clearGameBootstrap()
-    setLoading(true)
-    setError(null)
-    setOptimisticBoard(null)
-    setHighlightCells(new Set())
-    setJustPlaced(null)
-    setHoverMove(null)
-    try {
-      const res = await fetchApi('/game', { method: 'POST' })
-      if (!res.ok) throw new Error('Failed to create game')
-      const data = await res.json()
+  const createGame = useCallback(
+    async (nextDifficulty) => {
+      const level = nextDifficulty ?? difficulty
       clearGameBootstrap()
-      await applyGame(data)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [applyGame])
+      setLoading(true)
+      setError(null)
+      setOptimisticBoard(null)
+      setHighlightCells(new Set())
+      setJustPlaced(null)
+      setHoverMove(null)
+      setDifficulty(level)
+      try {
+        const res = await fetchApi('/game', {
+          method: 'POST',
+          body: JSON.stringify({ difficulty: level }),
+        })
+        if (!res.ok) throw new Error('Failed to create game')
+        const data = await res.json()
+        clearGameBootstrap()
+        await applyGame(data)
+      } catch (e) {
+        setError(e.message)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [applyGame, difficulty]
+  )
 
   /** First load / reload: resume active game; do not abandon on refresh. */
   const initGame = useCallback(async () => {
@@ -202,6 +243,8 @@ export default function App() {
     setJustPlaced(`${row},${col}`)
     setOptimisticBoard(afterHuman)
     setValidMoves([])
+    clearLongPress()
+    suppressClickRef.current = null
     setHoverMove(null)
     setSubmitting(true)
 
@@ -221,7 +264,11 @@ export default function App() {
         setOptimisticBoard(null)
         setJustPlaced(null)
         setHighlightCells(changed)
-        await fetchValidMoves(gameId)
+        if (data.status === 'finished') {
+          setValidMoves([])
+        } else {
+          await fetchValidMoves(gameId)
+        }
         setTimeout(() => setHighlightCells(new Set()), HIGHLIGHT_AI_MS)
       } catch (e) {
         setError(e.message)
@@ -251,7 +298,11 @@ export default function App() {
         const changed = cellsChanged(boardBefore, data.board)
         setGame(data)
         setHighlightCells(changed)
-        await fetchValidMoves(gameId)
+        if (data.status === 'finished') {
+          setValidMoves([])
+        } else {
+          await fetchValidMoves(gameId)
+        }
         setTimeout(() => setHighlightCells(new Set()), HIGHLIGHT_AI_MS)
       } catch (e) {
         setError(e.message)
@@ -262,7 +313,41 @@ export default function App() {
   }
 
   const handleRestart = () => {
-    createGame()
+    createGame(difficulty)
+  }
+
+  const handleDifficultyChange = async (level) => {
+    if (!DIFFICULTIES.includes(level)) return
+    if (level === difficulty) return
+    const pieceCount =
+      countPieces(game?.board, 'W') + countPieces(game?.board, 'B')
+    const gameStarted =
+      Boolean(optimisticBoard) ||
+      (game?.status === 'active' && pieceCount > 4)
+    if (loading || submitting || gameStarted) return
+
+    const previous = difficulty
+    setDifficulty(level)
+    if (game?.status !== 'active' || !gameId) return
+
+    try {
+      const res = await fetchApi(`/game/${gameId}/difficulty`, {
+        method: 'PATCH',
+        body: JSON.stringify({ difficulty: level }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'Failed to set difficulty')
+      }
+      const data = await res.json()
+      setGame(data)
+      if (DIFFICULTIES.includes(data.difficulty)) {
+        setDifficulty(data.difficulty)
+      }
+    } catch (e) {
+      setDifficulty(previous)
+      setError(e.message)
+    }
   }
 
   const handleExit = () => {
@@ -348,9 +433,10 @@ export default function App() {
           <aside className="instructions-tip" aria-label="Flip foresight">
             <h3>Flip foresight</h3>
             <p>
-              Flip foresight is on by default. Hover a highlighted legal move to preview which
-              opponent pieces would flip if you played there. Turn it off anytime with the
-              toggle in the side panel.
+              Flip foresight is on by default. On a computer, hover a highlighted legal move to
+              preview which opponent pieces would flip. On touch devices, press and hold a legal
+              move to preview, then tap to play. Turn it off anytime with the toggle in the side
+              panel.
             </p>
           </aside>
         </div>
@@ -443,7 +529,7 @@ export default function App() {
         <div className="error">
           {error}
           <br />
-          <button className="btn-restart" onClick={createGame} style={{ marginTop: 8 }}>Retry</button>
+          <button className="btn-restart" onClick={() => createGame(difficulty)} style={{ marginTop: 8 }}>Retry</button>
         </div>
         {instructionsModal}
         {statsModal}
@@ -454,6 +540,10 @@ export default function App() {
   const displayBoard = optimisticBoard ?? game?.board ?? []
   const blackCount = countPieces(displayBoard, 'B')
   const whiteCount = countPieces(displayBoard, 'W')
+  const gameStarted =
+    Boolean(optimisticBoard) ||
+    (game?.status === 'active' && blackCount + whiteCount > 4)
+  const canChangeDifficulty = !loading && !submitting && !gameStarted
   const isHumanTurn = game?.turn === 'W' && game?.status === 'active' && !submitting
   const mustPass = isHumanTurn && validMoves.length === 0
   const gameOver = game?.status === 'finished'
@@ -519,7 +609,9 @@ export default function App() {
             className="board"
             role="grid"
             aria-label="Reversi board"
-            onMouseLeave={() => setHoverMove(null)}
+            onMouseLeave={() => {
+              if (hasFineHover()) setHoverMove(null)
+            }}
           >
             {Array.from({ length: 64 }, (_, i) => {
               const r = Math.floor(i / 8)
@@ -539,10 +631,59 @@ export default function App() {
                   key={key}
                   role="gridcell"
                   className={`cell ${clickable ? 'clickable' : ''} ${gameOver ? 'game-over' : ''} ${isHighlight ? 'highlight-ai' : ''} ${isJustPlaced ? 'just-placed' : ''} ${isFlipPreview ? 'flip-preview' : ''} ${isHoverTarget ? 'hover-target' : ''}`}
-                  onClick={() => clickable && playMove(r, c)}
+                  onClick={() => {
+                    const suppress = suppressClickRef.current
+                    if (suppress && suppress.row === r && suppress.col === c) {
+                      suppressClickRef.current = null
+                      return
+                    }
+                    suppressClickRef.current = null
+                    if (clickable) playMove(r, c)
+                  }}
                   onMouseEnter={() => {
+                    if (!hasFineHover()) return
                     if (flipForesight && clickable) setHoverMove({ row: r, col: c })
                     else setHoverMove(null)
+                  }}
+                  onPointerDown={(e) => {
+                    if (e.pointerType === 'mouse') return
+                    clearLongPress()
+                    if (!clickable) {
+                      setHoverMove(null)
+                      return
+                    }
+                    if (!flipForesight) return
+                    try {
+                      e.currentTarget.setPointerCapture(e.pointerId)
+                    } catch {
+                      /* ignore capture failures */
+                    }
+                    const timerId = window.setTimeout(() => {
+                      setHoverMove({ row: r, col: c })
+                      if (longPressRef.current) {
+                        longPressRef.current.foresightShown = true
+                      }
+                    }, LONG_PRESS_MS)
+                    longPressRef.current = {
+                      row: r,
+                      col: c,
+                      timerId,
+                      foresightShown: false,
+                    }
+                  }}
+                  onPointerUp={() => {
+                    if (longPressRef.current?.foresightShown) {
+                      suppressClickRef.current = { row: r, col: c }
+                    }
+                    clearLongPress()
+                  }}
+                  onPointerCancel={() => {
+                    clearLongPress()
+                  }}
+                  onContextMenu={(e) => {
+                    if (!hasFineHover() && flipForesight && clickable) {
+                      e.preventDefault()
+                    }
                   }}
                   aria-label={cell === 'B' ? 'Black' : cell === 'W' ? 'White' : showDot ? 'Valid move' : 'Empty'}
                 >
@@ -577,7 +718,10 @@ export default function App() {
             Statistics
           </button>
 
-          <label className="option-toggle" title="Highlight pieces that would flip on hover">
+          <label
+            className="option-toggle"
+            title="Preview flips on hover (desktop) or press-and-hold (touch)"
+          >
             <input
               type="checkbox"
               checked={flipForesight}
@@ -585,6 +729,46 @@ export default function App() {
             />
             <span>Flip foresight</span>
           </label>
+
+          <section
+            className="difficulty-block"
+            title={
+              canChangeDifficulty
+                ? 'Choose AI difficulty before the first move'
+                : 'Difficulty is locked after the game starts'
+            }
+          >
+            <h3 className="difficulty-block-title">Difficulty</h3>
+            <div className="difficulty-options" role="radiogroup" aria-label="Difficulty">
+              <label className="option-toggle">
+                <input
+                  type="checkbox"
+                  checked={difficulty === 'easy'}
+                  disabled={!canChangeDifficulty}
+                  onChange={() => handleDifficultyChange('easy')}
+                />
+                <span>Easy</span>
+              </label>
+              <label className="option-toggle">
+                <input
+                  type="checkbox"
+                  checked={difficulty === 'medium'}
+                  disabled={!canChangeDifficulty}
+                  onChange={() => handleDifficultyChange('medium')}
+                />
+                <span>Medium</span>
+              </label>
+              <label className="option-toggle">
+                <input
+                  type="checkbox"
+                  checked={difficulty === 'hard'}
+                  disabled={!canChangeDifficulty}
+                  onChange={() => handleDifficultyChange('hard')}
+                />
+                <span>Hard</span>
+              </label>
+            </div>
+          </section>
 
           <div className="side-panel-actions">
             {mustPass && (

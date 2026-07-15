@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.deps import get_game_service
 from app.player_id import require_player_id
-from app.schemas import MoveRequest, GameResponse
+from app.schemas import CreateGameRequest, MoveRequest, GameResponse
 from core.engine import InvalidMove, get_valid_moves
 from services.game_service import GameService
 
@@ -13,9 +15,14 @@ router = APIRouter()
 def create_game(
     player_id: str = Depends(require_player_id),
     svc: GameService = Depends(get_game_service),
+    req: Annotated[CreateGameRequest | None, Body()] = None,
 ):
     """Start a new single-player game. Human = WHITE, AI = BLACK."""
-    game = svc.create_game(player_id)
+    difficulty = req.difficulty if req is not None else "easy"
+    try:
+        game = svc.create_game(player_id, difficulty=difficulty)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return _to_response(svc, game)
 
 
@@ -31,11 +38,27 @@ def get_active_game(
     return _to_response(svc, game)
 
 
+@router.patch("/{game_id}/difficulty", response_model=GameResponse)
+def set_difficulty(
+    game_id: str,
+    req: CreateGameRequest,
+    svc: GameService = Depends(get_game_service),
+):
+    """Set AI difficulty before the first move of an active game."""
+    try:
+        game = svc.set_difficulty(game_id, req.difficulty)
+        return _to_response(svc, game)
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+
 @router.get("/{game_id}", response_model=GameResponse)
 def get_game(game_id: str, svc: GameService = Depends(get_game_service)):
     """Get current game state."""
     try:
-        game = svc.repo.get(game_id)
+        game = svc.get_game(game_id)
         return _to_response(svc, game)
     except KeyError:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -45,7 +68,9 @@ def get_game(game_id: str, svc: GameService = Depends(get_game_service)):
 def get_valid_moves_for_game(game_id: str, svc: GameService = Depends(get_game_service)):
     """Return list of [row, col] valid for current turn (for UI hints)."""
     try:
-        game = svc.repo.get(game_id)
+        game = svc.get_game(game_id)
+        if game.status != "active":
+            return {"moves": []}
         moves = get_valid_moves(game.board, game.turn)
         return {"moves": [list(m) for m in moves]}
     except KeyError:
@@ -84,4 +109,5 @@ def _to_response(svc: GameService, game) -> GameResponse:
         board=game.board,
         turn=game.turn,
         status=game.status,
+        difficulty=getattr(game, "difficulty", None) or "easy",
     )

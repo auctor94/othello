@@ -31,14 +31,17 @@ export function fetchStats() {
  * Resume active game if present; otherwise create one.
  * Concurrent callers share one in-flight promise (React Strict Mode safe).
  */
-export function loadOrCreateGame() {
+export function loadOrCreateGame(difficulty = 'easy') {
   if (!bootstrapPromise) {
     bootstrapPromise = (async () => {
       const active = await fetchApi('/game/active')
       if (active.ok) {
         return active.json()
       }
-      const created = await fetchApi('/game', { method: 'POST' })
+      const created = await fetchApi('/game', {
+        method: 'POST',
+        body: JSON.stringify({ difficulty }),
+      })
       if (!created.ok) {
         throw new Error('Failed to create game')
       }
