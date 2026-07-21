@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { clearGameBootstrap, fetchApi, fetchStats, loadOrCreateGame } from './api'
+import { getInitialLang, saveLang, translate } from './i18n'
 import './App.css'
 
 const AI_DELAY_MS = 1400
@@ -16,8 +17,8 @@ function hasFineHover() {
 }
 
 /** H:MM:SS when ≥1h, otherwise M:SS */
-function formatDuration(seconds) {
-  if (seconds == null || Number.isNaN(Number(seconds))) return 'N/A'
+function formatDuration(seconds, na = 'N/A') {
+  if (seconds == null || Number.isNaN(Number(seconds))) return na
   const total = Math.max(0, Math.round(Number(seconds)))
   const h = Math.floor(total / 3600)
   const m = Math.floor((total % 3600) / 60)
@@ -34,8 +35,8 @@ function formatRatio(count, started, pct) {
   return `${count}/${started} (${p}%)`
 }
 
-function formatOptional(value) {
-  return value == null ? 'N/A' : String(value)
+function formatOptional(value, na = 'N/A') {
+  return value == null ? na : String(value)
 }
 
 function countPieces(board, color) {
@@ -100,6 +101,18 @@ function aiMoveHighlights(prevBoard, nextBoard) {
 }
 
 export default function App() {
+  const [lang, setLang] = useState(getInitialLang)
+  const t = useCallback((key) => translate(lang, key), [lang])
+  const setLanguage = useCallback((next) => {
+    if (next !== 'en' && next !== 'ru') return
+    setLang(next)
+    saveLang(next)
+  }, [])
+
+  useEffect(() => {
+    document.documentElement.lang = lang === 'ru' ? 'ru' : 'en'
+  }, [lang])
+
   const [gameId, setGameId] = useState(null)
   const [game, setGame] = useState(null)
   const [validMoves, setValidMoves] = useState([])
@@ -178,7 +191,7 @@ export default function App() {
     setError(null)
     try {
       const res = await fetchApi(`/game/${id}`)
-      if (!res.ok) throw new Error('Failed to load game')
+      if (!res.ok) throw new Error(translate(lang, 'failedLoadGame'))
       const data = await res.json()
       setGame(data)
       return data
@@ -186,7 +199,7 @@ export default function App() {
       setError(e.message)
       return null
     }
-  }, [])
+  }, [lang])
 
   const fetchValidMoves = useCallback(async (id) => {
     if (!id) return
@@ -229,7 +242,7 @@ export default function App() {
           method: 'POST',
           body: JSON.stringify({ difficulty: level }),
         })
-        if (!res.ok) throw new Error('Failed to create game')
+        if (!res.ok) throw new Error(translate(lang, 'failedCreateGame'))
         const data = await res.json()
         clearGameBootstrap()
         await applyGame(data)
@@ -239,7 +252,7 @@ export default function App() {
         setLoading(false)
       }
     },
-    [applyGame, clearAiHighlight, difficulty]
+    [applyGame, clearAiHighlight, difficulty, lang]
   )
 
   /** First load / reload: resume active game; do not abandon on refresh. */
@@ -295,7 +308,7 @@ export default function App() {
         })
         if (!res.ok) {
           const err = await res.json().catch(() => ({}))
-          throw new Error(err.detail || 'Invalid move')
+          throw new Error(err.detail || translate(lang, 'invalidMove'))
         }
         const data = await res.json()
         setGame(data)
@@ -329,7 +342,7 @@ export default function App() {
         const res = await fetchApi(`/game/${gameId}/pass`, { method: 'POST' })
         if (!res.ok) {
           const err = await res.json().catch(() => ({}))
-          throw new Error(err.detail || 'Cannot pass')
+          throw new Error(err.detail || translate(lang, 'cannotPass'))
         }
         const data = await res.json()
         setGame(data)
@@ -372,7 +385,7 @@ export default function App() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || 'Failed to set difficulty')
+        throw new Error(err.detail || translate(lang, 'failedSetDifficulty'))
       }
       const data = await res.json()
       setGame(data)
@@ -396,7 +409,7 @@ export default function App() {
     setStatsError(null)
     try {
       const res = await fetchStats()
-      if (!res.ok) throw new Error('Failed to load statistics')
+      if (!res.ok) throw new Error(translate(lang, 'failedLoadStats'))
       setStats(await res.json())
     } catch (e) {
       setStatsError(e.message)
@@ -420,87 +433,65 @@ export default function App() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2 id="instructions-title">How to Play</h2>
+          <h2 id="instructions-title">{t('howToPlay')}</h2>
           <button
             type="button"
             className="modal-close"
             onClick={() => setShowInstructions(false)}
-            aria-label="Close instructions"
+            aria-label={t('closeInstructions')}
           >
             ×
           </button>
         </div>
         <div className="modal-body">
-          <p>
-            Reversi is a strategy board game for two players where the goal is to finish with
-            the most pieces of your color on the 8 × 8 board. Players take turns placing pieces
-            with their color facing up. A valid move requires you to &quot;flank&quot; or
-            &quot;trap&quot; your opponent&apos;s pieces.
-          </p>
-          <h3>Setup</h3>
-          <p>
-            The game begins with 4 pieces in the center squares of the board: two dark pieces
-            and two light pieces, placed diagonally across from each other.
-          </p>
-          <h3>Make a Move</h3>
-          <p>
-            On your turn, place a new piece on any empty square so that it traps one or more of
-            your opponent&apos;s pieces in a straight continuous line. This line can be
-            horizontal, vertical, or diagonal.
-          </p>
-          <h3>Flanking &amp; Flipping</h3>
-          <p>
-            To trap a line, there must already be one of your pieces at the other end of that
-            line. When you successfully flank your opponent&apos;s pieces, you flip all of those
-            sandwiched pieces to your color.
-          </p>
-          <h3>Mandatory Captures</h3>
-          <p>
-            You can only make a move if it traps and flips at least one of your opponent&apos;s
-            pieces. If you have no valid moves, you must &quot;Pass&quot; your turn.
-          </p>
-          <h3>Winning</h3>
-          <p>
-            The game ends when the board is completely full, or neither player can make a legal
-            move. The player with the highest number of their color disks wins the game.
-          </p>
+          <p>{t('intro')}</p>
+          <h3>{t('setup')}</h3>
+          <p>{t('setupText')}</p>
+          <h3>{t('makeMove')}</h3>
+          <p>{t('makeMoveText')}</p>
+          <h3>{t('flanking')}</h3>
+          <p>{t('flankingText')}</p>
+          <h3>{t('mandatory')}</h3>
+          <p>{t('mandatoryText')}</p>
+          <h3>{t('winning')}</h3>
+          <p>{t('winningText')}</p>
 
-          <aside className="instructions-tip" aria-label="Flip foresight">
-            <h3>Flip foresight</h3>
-            <p>
-              Flip foresight is on by default. On a computer, hover a highlighted legal move to
-              preview which opponent pieces would flip. On touch devices, press and hold a legal
-              move to preview, then tap to play. Turn it off anytime with the toggle in the side
-              panel.
-            </p>
+          <aside className="instructions-tip" aria-label={t('flipForesightTip')}>
+            <h3>{t('flipForesightTip')}</h3>
+            <p>{t('flipForesightText')}</p>
           </aside>
         </div>
       </div>
     </div>
   ) : null
 
+  const na = t('na')
+  const dateLocale = lang === 'ru' ? 'ru-RU' : 'en-US'
   const statsRows = stats
     ? [
-        ['Since', stats.since ? new Date(stats.since).toLocaleDateString() : 'N/A'],
-        ['Days', String(stats.days ?? 0)],
-        ['Games started', String(stats.started)],
-        ['Games finished', String(stats.finished)],
-        ['Abandoned', formatRatio(stats.abandoned, stats.started, stats.abandoned_pct)],
-        ['Won', formatRatio(stats.won, stats.finished, stats.won_pct)],
-        ['Lost', formatRatio(stats.lost, stats.finished, stats.lost_pct)],
-        ['Tied', formatRatio(stats.tied, stats.finished, stats.tied_pct)],
-        ['Highest score', formatOptional(stats.highest_score)],
         [
-          'Lowest score',
-          stats.won + stats.lost === 0 ? 'N/A' : formatOptional(stats.lowest_score),
+          t('since'),
+          stats.since ? new Date(stats.since).toLocaleDateString(dateLocale) : na,
         ],
-        ['Average score', formatOptional(stats.avg_score)],
-        ['Highest move score', formatOptional(stats.highest_move_score)],
-        ['Longest win streak', String(stats.longest_win_streak)],
-        ['Total time', formatDuration(stats.total_time)],
-        ['Average time', formatDuration(stats.avg_time)],
-        ['Min time', formatDuration(stats.min_time)],
-        ['Max time', formatDuration(stats.max_time)],
+        [t('days'), String(stats.days ?? 0)],
+        [t('gamesStarted'), String(stats.started)],
+        [t('gamesFinished'), String(stats.finished)],
+        [t('abandoned'), formatRatio(stats.abandoned, stats.started, stats.abandoned_pct)],
+        [t('won'), formatRatio(stats.won, stats.finished, stats.won_pct)],
+        [t('lost'), formatRatio(stats.lost, stats.finished, stats.lost_pct)],
+        [t('tied'), formatRatio(stats.tied, stats.finished, stats.tied_pct)],
+        [t('highestScore'), formatOptional(stats.highest_score, na)],
+        [
+          t('lowestScore'),
+          stats.won + stats.lost === 0 ? na : formatOptional(stats.lowest_score, na),
+        ],
+        [t('averageScore'), formatOptional(stats.avg_score, na)],
+        [t('highestMoveScore'), formatOptional(stats.highest_move_score, na)],
+        [t('longestWinStreak'), String(stats.longest_win_streak)],
+        [t('totalTime'), formatDuration(stats.total_time, na)],
+        [t('averageTime'), formatDuration(stats.avg_time, na)],
+        [t('minTime'), formatDuration(stats.min_time, na)],
+        [t('maxTime'), formatDuration(stats.max_time, na)],
       ]
     : []
 
@@ -518,18 +509,18 @@ export default function App() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2 id="stats-title">Your statistics</h2>
+          <h2 id="stats-title">{t('yourStatistics')}</h2>
           <button
             type="button"
             className="modal-close"
             onClick={() => setShowStats(false)}
-            aria-label="Close statistics"
+            aria-label={t('closeStatistics')}
           >
             ×
           </button>
         </div>
         <div className="modal-body">
-          {statsLoading && <p className="stats-status">Loading…</p>}
+          {statsLoading && <p className="stats-status">{t('loading')}</p>}
           {!statsLoading && statsError && <p className="error">{statsError}</p>}
           {!statsLoading && !statsError && stats && (
             <table className="stats-table">
@@ -548,10 +539,31 @@ export default function App() {
     </div>
   ) : null
 
+  const langSwitch = (
+    <div className="lang-switch" role="group" aria-label={t('language')}>
+      <button
+        type="button"
+        className={lang === 'en' ? 'active' : ''}
+        aria-pressed={lang === 'en'}
+        onClick={() => setLanguage('en')}
+      >
+        {t('langEng')}
+      </button>
+      <button
+        type="button"
+        className={lang === 'ru' ? 'active' : ''}
+        aria-pressed={lang === 'ru'}
+        onClick={() => setLanguage('ru')}
+      >
+        {t('langRus')}
+      </button>
+    </div>
+  )
+
   if (loading && !game) {
     return (
       <>
-        <div className="loading">Starting game…</div>
+        <div className="loading">{t('startingGame')}</div>
         {instructionsModal}
         {statsModal}
       </>
@@ -564,7 +576,9 @@ export default function App() {
         <div className="error">
           {error}
           <br />
-          <button className="btn-restart" onClick={() => createGame(difficulty)} style={{ marginTop: 8 }}>Retry</button>
+          <button className="btn-restart" onClick={() => createGame(difficulty)} style={{ marginTop: 8 }}>
+            {t('retry')}
+          </button>
         </div>
         {instructionsModal}
         {statsModal}
@@ -583,14 +597,14 @@ export default function App() {
   const mustPass = isHumanTurn && validMoves.length === 0
   const gameOver = game?.status === 'finished'
   const turnLabel = gameOver
-    ? 'Game over'
+    ? t('gameOver')
     : submitting
-      ? 'AI is thinking…'
+      ? t('aiThinking')
       : mustPass
-        ? 'No legal moves — pass'
+        ? t('mustPass')
         : game?.turn === 'B'
-          ? "AI's turn"
-          : 'Your turn'
+          ? t('aiTurn')
+          : t('yourTurn')
 
   const hoverFlipKeys =
     flipForesight &&
@@ -609,13 +623,13 @@ export default function App() {
       <div className="layout">
         <div className="main">
           <header className="header">
-            <div className="scoreboard" aria-label="Score">
+            <div className="scoreboard" aria-label={t('score')}>
               <div
                 className={`score-card black ${game?.turn === 'B' && !gameOver ? 'active' : ''}`}
               >
                 <span className="score-disc black" aria-hidden />
                 <div className="score-meta">
-                  <span className="score-label">Black · AI</span>
+                  <span className="score-label">{t('blackAi')}</span>
                   <span className="score-value">{blackCount}</span>
                 </div>
               </div>
@@ -624,7 +638,7 @@ export default function App() {
               >
                 <span className="score-disc white" aria-hidden />
                 <div className="score-meta">
-                  <span className="score-label">White · You</span>
+                  <span className="score-label">{t('whiteYou')}</span>
                   <span className="score-value">{whiteCount}</span>
                 </div>
               </div>
@@ -643,7 +657,7 @@ export default function App() {
           <div
             className="board"
             role="grid"
-            aria-label="Reversi board"
+            aria-label={t('board')}
             onMouseLeave={() => {
               if (hasFineHover()) setHoverMove(null)
             }}
@@ -721,7 +735,15 @@ export default function App() {
                       e.preventDefault()
                     }
                   }}
-                  aria-label={cell === 'B' ? 'Black' : cell === 'W' ? 'White' : showDot ? 'Valid move' : 'Empty'}
+                  aria-label={
+                    cell === 'B'
+                      ? t('black')
+                      : cell === 'W'
+                        ? t('white')
+                        : showDot
+                          ? t('validMove')
+                          : t('empty')
+                  }
                 >
                   {cell === 'B' && <span className="piece black" />}
                   {cell === 'W' && <span className="piece white" />}
@@ -734,12 +756,17 @@ export default function App() {
 
           {gameOver && (
             <p className="status">
-              {blackCount > whiteCount ? 'Black (AI) wins!' : whiteCount > blackCount ? 'White (You) win!' : 'Draw!'}
+              {blackCount > whiteCount
+                ? t('blackWins')
+                : whiteCount > blackCount
+                  ? t('whiteWins')
+                  : t('draw')}
             </p>
           )}
         </div>
 
-        <aside className="side-panel" aria-label="Game controls">
+        <aside className="side-panel" aria-label={t('gameControls')}>
+          {langSwitch}
           <button
             type="button"
             className="btn-instructions"
@@ -748,34 +775,31 @@ export default function App() {
               setShowInstructions(true)
             }}
           >
-            Instructions
+            {t('instructions')}
           </button>
           <button type="button" className="btn-instructions" onClick={openStats}>
-            Statistics
+            {t('statistics')}
           </button>
 
-          <label
-            className="option-toggle"
-            title="Preview flips on hover (desktop) or press-and-hold (touch)"
-          >
+          <label className="option-toggle" title={t('flipForesightTitle')}>
             <input
               type="checkbox"
               checked={flipForesight}
               onChange={(e) => setFlipForesight(e.target.checked)}
             />
-            <span>Flip foresight</span>
+            <span>{t('flipForesight')}</span>
           </label>
 
           <section
             className="difficulty-block"
             title={
               canChangeDifficulty
-                ? 'Choose AI difficulty before the first move'
-                : 'Difficulty is locked after the game starts'
+                ? t('difficultyTitleUnlocked')
+                : t('difficultyTitleLocked')
             }
           >
-            <h3 className="difficulty-block-title">Difficulty</h3>
-            <div className="difficulty-options" role="radiogroup" aria-label="Difficulty">
+            <h3 className="difficulty-block-title">{t('difficulty')}</h3>
+            <div className="difficulty-options" role="radiogroup" aria-label={t('difficulty')}>
               <label className="option-toggle">
                 <input
                   type="checkbox"
@@ -783,7 +807,7 @@ export default function App() {
                   disabled={!canChangeDifficulty}
                   onChange={() => handleDifficultyChange('easy')}
                 />
-                <span>Easy</span>
+                <span>{t('easy')}</span>
               </label>
               <label className="option-toggle">
                 <input
@@ -792,7 +816,7 @@ export default function App() {
                   disabled={!canChangeDifficulty}
                   onChange={() => handleDifficultyChange('medium')}
                 />
-                <span>Medium</span>
+                <span>{t('medium')}</span>
               </label>
               <label className="option-toggle">
                 <input
@@ -801,7 +825,7 @@ export default function App() {
                   disabled={!canChangeDifficulty}
                   onChange={() => handleDifficultyChange('hard')}
                 />
-                <span>Hard</span>
+                <span>{t('hard')}</span>
               </label>
             </div>
           </section>
@@ -809,14 +833,14 @@ export default function App() {
           <div className="side-panel-actions">
             {mustPass && (
               <button type="button" className="btn-pass" onClick={() => playPass()} disabled={submitting}>
-                Pass
+                {t('pass')}
               </button>
             )}
             <button type="button" className="btn-restart" onClick={handleRestart}>
-              Restart
+              {t('restart')}
             </button>
             <button type="button" className="btn-exit" onClick={handleExit}>
-              Exit
+              {t('exit')}
             </button>
           </div>
         </aside>
