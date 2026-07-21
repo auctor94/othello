@@ -3,7 +3,8 @@ import { clearGameBootstrap, fetchApi, fetchStats, loadOrCreateGame } from './ap
 import './App.css'
 
 const AI_DELAY_MS = 1400
-const HIGHLIGHT_AI_MS = 800
+/** How long AI placement + flipped discs stay highlighted after the bot moves */
+const HIGHLIGHT_AI_MS = 3000
 const LONG_PRESS_MS = 380
 const DIFFICULTIES = ['easy', 'medium', 'hard']
 
@@ -81,13 +82,21 @@ function applyMoveToBoard(board, player, move) {
   return next
 }
 
-function cellsChanged(prevBoard, nextBoard) {
-  const set = new Set()
-  for (let r = 0; r < 8; r++)
-    for (let c = 0; c < 8; c++)
-      if ((prevBoard[r]?.[c] || '.') !== (nextBoard[r]?.[c] || '.'))
-        set.add(`${r},${c}`)
-  return set
+/** Split AI board delta into placement cells (empty→stone) vs flipped discs. */
+function aiMoveHighlights(prevBoard, nextBoard) {
+  const placed = new Set()
+  const flips = new Set()
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const prev = prevBoard[r]?.[c] || '.'
+      const next = nextBoard[r]?.[c] || '.'
+      if (prev === next) continue
+      const key = `${r},${c}`
+      if (prev === '.') placed.add(key)
+      else flips.add(key)
+    }
+  }
+  return { placed, flips }
 }
 
 export default function App() {
@@ -99,10 +108,13 @@ export default function App() {
   const [error, setError] = useState(null)
   /** Optimistic board shown after human move, before AI response */
   const [optimisticBoard, setOptimisticBoard] = useState(null)
-  /** Cells that just changed from AI move (for highlight animation) */
+  /** Cells where AI placed a stone (brighter highlight) */
+  const [aiPlacedCells, setAiPlacedCells] = useState(new Set())
+  /** Discs flipped by the AI move (softer highlight) */
   const [highlightCells, setHighlightCells] = useState(new Set())
   /** Cell where human just placed (for brief place animation) */
   const [justPlaced, setJustPlaced] = useState(null)
+  const highlightTimerRef = useRef(null)
   const [showInstructions, setShowInstructions] = useState(true)
   const [showStats, setShowStats] = useState(false)
   const [stats, setStats] = useState(null)
@@ -125,7 +137,34 @@ export default function App() {
     longPressRef.current = null
   }, [])
 
+  const clearAiHighlight = useCallback(() => {
+    if (highlightTimerRef.current != null) {
+      clearTimeout(highlightTimerRef.current)
+      highlightTimerRef.current = null
+    }
+    setAiPlacedCells(new Set())
+    setHighlightCells(new Set())
+  }, [])
+
+  const showAiHighlight = useCallback(
+    (prevBoard, nextBoard) => {
+      const { placed, flips } = aiMoveHighlights(prevBoard, nextBoard)
+      if (highlightTimerRef.current != null) {
+        clearTimeout(highlightTimerRef.current)
+      }
+      setAiPlacedCells(placed)
+      setHighlightCells(flips)
+      highlightTimerRef.current = setTimeout(() => {
+        setAiPlacedCells(new Set())
+        setHighlightCells(new Set())
+        highlightTimerRef.current = null
+      }, HIGHLIGHT_AI_MS)
+    },
+    []
+  )
+
   useEffect(() => () => clearLongPress(), [clearLongPress])
+  useEffect(() => () => clearAiHighlight(), [clearAiHighlight])
 
   useEffect(() => {
     if (!flipForesight) {
@@ -181,7 +220,7 @@ export default function App() {
       setLoading(true)
       setError(null)
       setOptimisticBoard(null)
-      setHighlightCells(new Set())
+      clearAiHighlight()
       setJustPlaced(null)
       setHoverMove(null)
       setDifficulty(level)
@@ -200,7 +239,7 @@ export default function App() {
         setLoading(false)
       }
     },
-    [applyGame, difficulty]
+    [applyGame, clearAiHighlight, difficulty]
   )
 
   /** First load / reload: resume active game; do not abandon on refresh. */
@@ -208,7 +247,7 @@ export default function App() {
     setLoading(true)
     setError(null)
     setOptimisticBoard(null)
-    setHighlightCells(new Set())
+    clearAiHighlight()
     setJustPlaced(null)
     setHoverMove(null)
     try {
@@ -219,7 +258,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [applyGame])
+  }, [applyGame, clearAiHighlight])
 
   useEffect(() => {
     initGame()
@@ -259,17 +298,15 @@ export default function App() {
           throw new Error(err.detail || 'Invalid move')
         }
         const data = await res.json()
-        const changed = cellsChanged(afterHuman, data.board)
         setGame(data)
         setOptimisticBoard(null)
         setJustPlaced(null)
-        setHighlightCells(changed)
+        showAiHighlight(afterHuman, data.board)
         if (data.status === 'finished') {
           setValidMoves([])
         } else {
           await fetchValidMoves(gameId)
         }
-        setTimeout(() => setHighlightCells(new Set()), HIGHLIGHT_AI_MS)
       } catch (e) {
         setError(e.message)
         setOptimisticBoard(null)
@@ -295,15 +332,13 @@ export default function App() {
           throw new Error(err.detail || 'Cannot pass')
         }
         const data = await res.json()
-        const changed = cellsChanged(boardBefore, data.board)
         setGame(data)
-        setHighlightCells(changed)
+        showAiHighlight(boardBefore, data.board)
         if (data.status === 'finished') {
           setValidMoves([])
         } else {
           await fetchValidMoves(gameId)
         }
-        setTimeout(() => setHighlightCells(new Set()), HIGHLIGHT_AI_MS)
       } catch (e) {
         setError(e.message)
       } finally {
@@ -621,6 +656,7 @@ export default function App() {
               const clickable = empty && isValidMove(validMoves, r, c) && isHumanTurn && !gameOver
               const showDot = empty && isValidMove(validMoves, r, c) && isHumanTurn
               const key = `${r},${c}`
+              const isAiPlaced = aiPlacedCells.has(key)
               const isHighlight = highlightCells.has(key)
               const isJustPlaced = justPlaced === key
               const isFlipPreview = flipForesight && hoverFlipKeys.has(key)
@@ -630,7 +666,7 @@ export default function App() {
                 <div
                   key={key}
                   role="gridcell"
-                  className={`cell ${clickable ? 'clickable' : ''} ${gameOver ? 'game-over' : ''} ${isHighlight ? 'highlight-ai' : ''} ${isJustPlaced ? 'just-placed' : ''} ${isFlipPreview ? 'flip-preview' : ''} ${isHoverTarget ? 'hover-target' : ''}`}
+                  className={`cell ${clickable ? 'clickable' : ''} ${gameOver ? 'game-over' : ''} ${isAiPlaced ? 'highlight-ai-placed' : ''} ${isHighlight ? 'highlight-ai' : ''} ${isJustPlaced ? 'just-placed' : ''} ${isFlipPreview ? 'flip-preview' : ''} ${isHoverTarget ? 'hover-target' : ''}`}
                   onClick={() => {
                     const suppress = suppressClickRef.current
                     if (suppress && suppress.row === r && suppress.col === c) {
